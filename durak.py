@@ -81,7 +81,6 @@ class GameState:
 
         combinations.extend([card] for card in legal_cards)
 
-        # Find multiple cards of the same rank
         rank_groups = {}
         for card in legal_cards:
             if card.rank not in rank_groups:
