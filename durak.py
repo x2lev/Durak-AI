@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 import itertools
+import pickle
 import random
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class Deck:
         trump_card = self.cards.pop()
         self.trump = trump_card.suit
         self.cards.insert(0, trump_card)
+        print(trump_card)
 
     def pop(self):
         return self.cards.pop()
@@ -42,16 +44,18 @@ class Deck:
     def has_cards(self):
         return len(self.cards) > 0
 
-    def shown_trump(self):
-        if self.cards:
-            return self.cards[0]
-
 class GameState:
     def __init__(self, number_of_players):
         self.number_of_players = number_of_players
         self.primary_attacker = None
+        self.discard = []
+        self.deck = None
+        self.trump = None
+
+        self.primary_attacker = number_of_players
+        self.field = {}
+        self.out = []
         self.durak = None
-        self.reset()
 
     def reset(self):
         self.discard = []
@@ -100,20 +104,38 @@ class GameState:
                     for combo in itertools.combinations(cards, i):
                         combinations.append(sorted(combo))
 
-        if self.field:
-            combinations.extend([None])
-
         discard_cap = 6 if self.discard else 5
-        return [combo for combo in combinations if len(combo)+len(self.field) < discard_cap]
+        capped_combos = [combo for combo in combinations if len(combo)+len(self.field) < discard_cap]
+
+        if self.field:
+            capped_combos.append([None])
+
+        return capped_combos
 
     def legal_defenses(self):
-        legal = [(None, None)]
+        legal_cards = []
         for attack_card, defense_card in self.field.items():
             if defense_card is None:
-                for card in self.hands[self.defender]:
+                for card in self.hands[self.defender()]:
                     if self.can_beat(attack_card, card):
-                        legal.append((attack_card, card))
-        return legal
+                        legal_cards.append((attack_card, card))
+
+        def_groups = {}
+        for a, d in legal_cards:
+            if a not in def_groups:
+                def_groups[a] = []
+            def_groups[a].append(d)
+        
+        combinations = []
+
+        for r in range(1, len(def_groups) + 1):
+            for key_subset in itertools.combinations(list(def_groups.keys()), r):
+                for values in itertools.product(*(def_groups[k] for k in key_subset)):
+                    combinations.append(list(zip(key_subset, values)))
+
+        combinations.append([(None, None)])
+        
+        return combinations
 
     def can_beat(self, attack, defense):
         if defense.suit == attack.suit:
@@ -127,6 +149,7 @@ class GameState:
 
     def defend(self, attack_card, defense_card):
         self.field[attack_card] = defense_card
+        print(defense_card)
         self.hands[self.defender()].remove(defense_card)
 
     def beat(self):
@@ -138,10 +161,7 @@ class GameState:
         self.draw_cards()
         self.check_outs()
 
-        if self.primary_attacker == (na := self.next_after(self.primary_attacker)):
-            self.durak = na
-        else:
-            self.primary_attacker = na
+        self.primary_attacker = self.next_after(self.primary_attacker)
 
     def surrender(self):
         for a, d in self.field.items():
@@ -153,10 +173,7 @@ class GameState:
         self.draw_cards()
         self.check_outs()
 
-        if self.primary_attacker == (na := self.next_after(self.defender())):
-            self.durak = na
-        else:
-            self.primary_attacker = na
+        self.primary_attacker = self.next_after(self.defender())
 
     def draw_cards(self):
         draw_order = [self.primary_attacker]
@@ -167,15 +184,19 @@ class GameState:
         draw_order.append(self.defender())
 
         for p in draw_order:
-            while self.deck.has_cards() and self.hands[p] < 6:
+            while self.deck.has_cards() and len(self.hands[p]) < 6:
                 self.hands[p].append(self.deck.pop())
             if not self.deck.has_cards():
                 break
 
     def check_outs(self):
+        self.outs = []
         for i, hand in enumerate(self.hands):
             if not hand and not self.deck.has_cards():
                 self.out.append(i)
+        ins = list(set(i for i in range(self.number_of_players)) - set(self.outs))
+        if len(ins) == 1:
+            self.durak = ins[0]
 
 class Player:
     def __init__(self, name):
@@ -189,17 +210,16 @@ class Player:
 
 class BotPlayer(Player):
     def decide_attack(self, game_state, idx):
-        if game_state.legal_attacks(idx):
-            return random.choice(game_state.legal_attacks(idx))
-        return [None]
+        c = random.choice(game_state.legal_attacks(idx))
+        return c
 
     def decide_defense(self, game_state):
-        if game_state.legal_defenses(game_state.defender()):
-            return random.choice(game_state.legal_defenses())
-        return (None, None)
+        c = random.choice(game_state.legal_defenses())
+        return c
 
 class HumanPlayer(Player):
     def decide_attack(self, game_state, idx):
+        assert 1 == 0
         print('           ATTACK')
         print(f'  Play Field: {game_state.field}')
         print(f'Current Hand: {game_state.hands[idx]}')
@@ -208,6 +228,8 @@ class HumanPlayer(Player):
         attack = None
         while attack not in game_state.legal_attacks(idx):
             request = input('What card(s) to play? ').upper().split(' ')
+            if request == ['']:
+                return [None]
             attack = sorted(card for card in game_state.hands[idx] if str(card) in request)
         return attack
 
@@ -216,13 +238,20 @@ class HumanPlayer(Player):
         print(f'  Play Field: {game_state.field}')
         print(f'Current Hand: {game_state.hands[game_state.defender()]}')
         print(f' Legal Plays: {game_state.legal_defenses()}')
-        print('Input attack card and then defense card (e.g. "6C TC")')
+        print('Input attack card and then defense card (e.g. "6C TC 8H AH")')
         while True:
-            reqa, reqd = tuple(input('What card(s) to play? ').upper().split(' '))
-            for a in game_state.field():
-                for d in game_state.hands[game_state.defender()]:
-                    if (reqa, reqd) == (str(a), str(d)):
-                        return a, d
+            request = input('What card(s) to play? ').upper().split(' ')
+            if request == ['']:
+                return [(None, None)]
+            if len(request) % 2 == 0:
+                pairs = [(request[i], request[i+1]) for i in range(0, len(request), 2)]
+                cards = []
+                for a in game_state.field:
+                    for d in game_state.hands[game_state.defender()]:
+                        if (str(a), str(d)) in pairs:
+                            cards.append((a, d))
+                if len(pairs) == len(cards):
+                    return cards
 
 class GameController:
     def __init__(self, *players: list[Player]):
@@ -238,14 +267,15 @@ class GameController:
 
             turns_since_defense = 0
             while turns_since_defense < 5:
-                if self.handle_defense():
+                if (defended := self.handle_defense()):
                     turns_since_defense = 0
-                else:
-                    turns_since_defense += 1
                 p = self.game_state.next_after(defender)
+                attacked = False
                 for _ in range(len(self.game_state.hands)-len(self.game_state.out) - 1):
-                    self.handle_attack(p)
+                    attacked = attacked or self.handle_attack(p)
                     p = self.game_state.next_after(p)
+                if not attacked and not defended:
+                    turns_since_defense += 1
 
             if None in self.game_state.field.values():
                 p = self.game_state.next_after(defender)
@@ -253,21 +283,38 @@ class GameController:
                     self.handle_attack(p)
                     p = self.game_state.next_after(p)
                 self.game_state.surrender()
+            else:
+                self.game_state.beat()
+        print(f'durak is {self.players[self.game_state.durak].name}')
 
     def handle_attack(self, idx):
         attack = self.players[idx].decide_attack(self.game_state, idx)
-        if attack is None:
+        if attack == [None]:
             return False
         self.game_state.attack(idx, attack)
         return True
 
     def handle_defense(self):
-        a, d = self.players[self.game_state.defender()].decide_defense(self.game_state)
-        if a is None:
+        pairs = self.players[self.game_state.defender()].decide_defense(self.game_state)
+        if pairs == [(None, None)]:
             return False
-        self.game_state.defend(a, d)
+        for a, d in pairs:
+            self.game_state.defend(a, d)
         return True
 
 if __name__ == '__main__':
-    gc = GameController(HumanPlayer('Lev'), BotPlayer('Bot'))
-    gc.play_game()
+    if input('use seed? ').lower() in ['yes', 'y']:
+        print('loading seed...')
+        with open('seed', 'rb') as f:
+            random.setstate(pickle.loads(f))
+
+    try:
+        gc = GameController(HumanPlayer('Lev'), BotPlayer('Bot'))
+        gc.play_game()
+    except Exception as e:
+        print(e)
+
+    if input('save seed? ').lower() in ['yes', 'y']:
+        print('dumping seed...')
+        with open('seed', 'wb') as f:
+            pickle.dumps(f, random.getstate())
