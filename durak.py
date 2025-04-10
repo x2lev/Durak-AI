@@ -63,7 +63,7 @@ class GameState:
         self.deck.choose_trump()
         self.trump = self.deck.trump
 
-        self.primary_attacker = random.randrange(self.number_of_players)
+        self.primary_attacker = 0
         self.field = {}
         self.out = []
         self.durak = None
@@ -115,6 +115,7 @@ class GameState:
         return capped_combos
 
     def legal_defenses(self):
+        '''
         pass_it_on = []
         if self.field and not self.field.values():
             rank = list(self.field.keys())[0].rank
@@ -128,7 +129,7 @@ class GameState:
             for card in cards:
                 if card.suit == self.trump.suit:
                     pass_it_on[-1].append(('hold', card))
-                    break
+                    break'''
 
         if self.durak is not None:
             return [[(None, None)]]
@@ -286,11 +287,15 @@ class HumanPlayer(Player):
 class GameController:
     def __init__(self, *players: list[Player]):
         self.game_state = GameState(len(players))
+        self.phase = None
         self.players = players
+        self.current_player = 0
 
     def play_game(self):
         self.game_state.reset()
         while self.game_state.durak is None:
+            self.phase = 0 # Initial attack
+            self.current_player = self.game_state.primary_attacker
             attacker = self.game_state.primary_attacker
             defender = self.game_state.defender()
             if attacker == defender:
@@ -298,24 +303,30 @@ class GameController:
                 break
             print(f'{self.game_state.hands[attacker]}, {self.game_state.hands[defender]}')
             self.handle_attack(attacker)
-
             turns_since_defense = 0
             while turns_since_defense < 5:
+                self.phase = 1 # Defense
+                self.current_player = self.game_state.defender()
                 if (defended := self.handle_defense()):
                     if not self.game_state.hands[defender]:
                         break
                     turns_since_defense = 0
+                self.phase = 2 # Additional attacks
                 p = self.game_state.next_after(defender)
                 attacked = False
                 for _ in range(len(self.game_state.hands)-len(self.game_state.out) - 1):
-                    attacked = attacked or self.handle_attack(p)
+                    self.current_player = p
+                    attacked = self.handle_attack(p) or attacked
                     p = self.game_state.next_after(p)
+                self.phase = 1 # Defense
                 if not attacked and not defended:
                     turns_since_defense += 1
 
             if None in self.game_state.field.values():
+                self.phase = 4 # In chase
                 p = self.game_state.next_after(defender)
                 for _ in range(len(self.game_state.hands)-len(self.game_state.out) - 1):
+                    self.current_player = p
                     self.handle_attack(p)
                     p = self.game_state.next_after(p)
                 print(self.game_state.field)
@@ -341,6 +352,19 @@ class GameController:
         for a, d in pairs:
             self.game_state.defend(a, d)
         return True
+    
+    def get_state(self, idx):
+        state = {
+            'hand': [str(c) for c in self.game_state.hands[idx]],
+            'field': {str(a): str(d) for a, d in self.game_state.field.items()},
+            'discard': [str(c) for c in self.game_state.discard],
+            'trump': str(self.game_state.trump),
+            'phase': self.phase, # 1, 2, 3, 4
+            'defending': idx == self.game_state.defender(),
+            'deck_size': len(self.game_state.deck.cards),
+            'opp_sizes': [len(h) for h in self.game_state.hands]
+        }
+        return state
 
 if __name__ == '__main__':
     gc = GameController(BotPlayer('Bot1'), BotPlayer('Bot2'))
