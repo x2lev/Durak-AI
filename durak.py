@@ -115,7 +115,6 @@ class GameState:
         return capped_combos
 
     def legal_defenses(self):
-        '''
         pass_it_on = []
         if self.field and not self.field.values():
             rank = list(self.field.keys())[0].rank
@@ -128,8 +127,8 @@ class GameState:
                     pass_it_on[-1].append(('pass', card))
             for card in cards:
                 if card.suit == self.trump.suit:
-                    pass_it_on[-1].append(('hold', card))
-                    break'''
+                    pass_it_on[-1].append(('show', card))
+                    break
 
         if self.durak is not None:
             return [[(None, None)]]
@@ -165,8 +164,8 @@ class GameState:
                         unique_combos.append(list(subset))
 
         unique_combos.append([(None, None)])
-        
-        return unique_combos + pass_it_on
+
+        return unique_combos #+ pass_it_on
 
     def can_beat(self, attack, defense):
         if defense.suit == attack.suit:
@@ -236,10 +235,10 @@ class Player:
     def __init__(self, name):
         self.name = name
 
-    def decide_attack(self, game_state, idx):
+    def decide_attack(self, _game_state, _idx):
         return [None]
 
-    def decide_defense(self, game_state):
+    def decide_defense(self, _game_state):
         return (None, None)
 
 class BotPlayer(Player):
@@ -270,10 +269,16 @@ class HumanPlayer(Player):
         print(f'Current Hand: {game_state.hands[game_state.defender()]}')
         print(f' Legal Plays: {game_state.legal_defenses()}')
         print('Input attack card and then defense card (e.g. "6C TC 8H AH")')
+        print('To pass it on, type pass and then the cards you want to play')
+        print('To pass it on, type pass and then the cards you want to play')
         while True:
             request = input('What card(s) to play? ').upper().split(' ')
             if request == ['']:
                 return [(None, None)]
+            if request[0] == 'show':
+                for card in game_state.hands[game_state.defender()]:
+                    if ('show', )
+                return [('show',)] 
             if len(request) % 2 == 0:
                 pairs = [(request[i], request[i+1]) for i in range(0, len(request), 2)]
                 cards = []
@@ -352,7 +357,7 @@ class GameController:
         for a, d in pairs:
             self.game_state.defend(a, d)
         return True
-    
+
     def get_state(self, idx):
         state = {
             'hand': [str(c) for c in self.game_state.hands[idx]],
